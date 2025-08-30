@@ -1,0 +1,143 @@
+#####
+# public routes
+#####
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: demo-public
+  namespace: demo
+spec:
+  parentRefs:
+  - name: internal
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostnames:
+  - eg-demo2.foobar.com
+  rules:
+  - backendRefs:
+    - group: ""
+      kind: Service
+      name: echoserver
+      port: 80
+      weight: 1
+    matches:
+    - path:
+        type: PathPrefix
+        value: /
+#####
+# login routes
+#####
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: demo-login
+  namespace: demo
+spec:
+  parentRefs:
+  - name: internal
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostnames:
+  - eg-demo2.foobar.com
+  rules:
+  - backendRefs:
+    - group: ""
+      kind: Service
+      name: echoserver
+      port: 80
+      weight: 1
+    matches:
+    - path:
+        type: PathPrefix
+        value: /login
+    - path:
+        type: PathPrefix
+        value: /oauth2/callback
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: demo-auth
+  namespace: demo
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: demo-login
+  oidc:
+    provider:
+      issuer: https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_xxxxx
+    clientID: yyyy
+    forwardAccessToken: true
+    refreshToken: true
+    cookieNames:
+      idToken: IdToken
+    scopes:
+    - openid
+    - email
+    - profile
+    clientSecret:
+      group: ""
+      kind: Secret
+      name: my-cognito-client-secret
+#####
+# api routes
+#####
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: demo-api
+  namespace: demo
+spec:
+  parentRefs:
+  - name: internal
+    namespace: envoy-gateway-system
+    sectionName: https
+  hostnames:
+  - eg-demo2.foobar.com
+  rules:
+  - backendRefs:
+    - group: ""
+      kind: Service
+      name: echoserver
+      port: 80
+      weight: 1
+    matches:
+    - path:
+        type: PathPrefix
+        value: /api
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: demo-api-jwt
+  namespace: demo
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: HTTPRoute
+    name: demo-api
+  jwt:
+    providers:
+    - name: cognito
+      extractFrom:
+        cookies:
+        - IdToken
+      claimToHeaders:
+      - claim: sub
+        header: x-sub
+      remoteJWKS:
+        uri: https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_xxxxx/.well-known/jwks.json
+  authorization:
+    defaultAction: Deny
+    rules:
+    - action: Allow
+      principal:
+        jwt:
+          provider: cognito
+          claims:
+          - name: cognito:groups
+            valueType: StringArray
+            values: [xxx]
